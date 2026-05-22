@@ -1,0 +1,80 @@
+# ===========================================================================
+# neural-flow-surrogates - default configuration
+# Code stays in the repo; data and checkpoints live under /slimdata/abhinav/neuralflow.
+# ===========================================================================
+
+paths:
+  # --- raw source data (Julia .jld2) -------------------------------------
+  # CONFIRM these with `julia export_data.jl --inspect` before the first run.
+  raw_flow_jld2: /slimdata/abhinav/Sequential_Bayes/JutulSeis/data/cond_rtm/Wise128_state_t1_rtm1_broad_NL_SNR28.jld2
+  raw_gt_jld2:   /slimdata/abhinav/Sequential_Bayes/JutulSeis/data/cond_rtm/Wise5_state_rtm_Groundtruth_NL_SNR28.jld2
+  raw_perm_jld2: /slimdata/abhinav/Sequential_Bayes/model/broad&narrow_perm_models_new.jld2
+
+  # --- project storage (created if missing) ------------------------------
+  data_dir:    /slimdata/abhinav/neuralflow/data
+  ckpt_dir:    /slimdata/abhinav/neuralflow/checkpoints
+  results_dir: /slimdata/abhinav/neuralflow/results
+
+raw:
+  # Variable names inside the .jld2 files. CONFIRM with `--inspect`.
+  flow_var: state128_t1        # flow state array; layout decoded in export_data.jl
+  gt_var:   state128_GT        # ground-truth trajectory
+  perm_var: Ks                 # permeability pool in raw_perm_jld2 (placeholder - confirm)
+  idx_var:  idx_t1             # index (in raw_flow_jld2) mapping sims -> perm pool
+  # Per-sample flow vector packs 2*n_timesteps blocks of size (nx*nz):
+  #   blocks 1..T   = saturation (t1..tT),  blocks T+1..2T = pressure (t1..tT)
+  n_attributes: 2              # saturation, pressure
+  saturation_block: 1          # 1-indexed block where saturation starts
+  # Julia fields are (nx, nz) = (512, 256), x-fast/column-major. export_data.jl
+  # transposes each field to image convention (height=nz, width=nx) = (256, 512).
+
+grid:
+  height: 256                  # nz  (depth, array rows)
+  width: 512                   # nx  (horizontal, array columns)
+  spacing_m: 6.25
+  n_timesteps: 24
+
+data:
+  n_sims: 128
+  split: {train: 0.75, val: 0.125, test: 0.125}   # split is by SIMULATION
+  seed: 0
+  kfold: 5                      # cross-validation folds (small-data regime)
+  perm_log_transform: true      # permeability spans orders of magnitude
+  saturation_clip: [0.0, 1.0]
+
+model:
+  fno:
+    width: 36
+    modes: [32, 32]
+    n_layers: 4
+  unet:
+    base_channels: 64
+    channel_mults: [1, 2, 2, 4]   # self-attention is applied at the bottleneck only
+  dit:                          # Phase 2
+    patch_size: 16
+    hidden_size: 384
+    depth: 8
+    num_heads: 6
+
+diffusion:
+  timesteps: 1000
+  schedule: cosine
+  sampler: ddim                 # ddim for fast inference benchmarking
+  sampler_steps: 50
+
+train:
+  epochs: 300
+  batch_size: 16
+  lr: 3.0e-4
+  weight_decay: 1.0e-5
+  grad_clip: 1.0
+  amp: true                     # mixed precision
+  ema_decay: 0.999              # for diffusion models
+  num_workers: 8
+  ensemble_size: 5              # FNO deep-ensemble members
+
+eval:
+  rollout_steps: 23             # t1 -> t24
+  uq_samples: 32                # generative-model samples for UQ
+  front_threshold: 0.1          # saturation level defining the plume front
+  jutul_reference_seconds: null # wall-clock of one JutulDarcy run; fill in for the speedup number

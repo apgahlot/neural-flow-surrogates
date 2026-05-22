@@ -1,0 +1,29 @@
+# Data, models, results live outside the repo (see configs/default.yaml) — never commit them
+*.jld2
+*.h5
+*.hdf5
+*.npz
+*.npy
+*.pt
+*.pth
+*.ckpt
+data/
+checkpoints/
+results/
+runs/
+wandb/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+.pytest_cache/
+.venv/
+venv/
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
