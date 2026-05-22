@@ -6,6 +6,8 @@ Uncertainty is obtained externally via a deep ensemble of independently
 trained FNOs.
 """
 from __future__ import annotations
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -45,7 +47,8 @@ class FNO2d(nn.Module):
         self.spectral = nn.ModuleList(
             [SpectralConv2d(width, width, modes[0], modes[1]) for _ in range(n_layers)])
         self.local = nn.ModuleList([nn.Conv2d(width, width, 1) for _ in range(n_layers)])
-        self.norms = nn.ModuleList([nn.GroupNorm(8, width) for _ in range(n_layers)])
+        ng = max(1, math.gcd(8, width))   # robust to widths not divisible by 8
+        self.norms = nn.ModuleList([nn.GroupNorm(ng, width) for _ in range(n_layers)])
         self.proj = nn.Sequential(
             nn.Conv2d(width, 128, 1), nn.GELU(), nn.Conv2d(128, out_ch, 1))
 
