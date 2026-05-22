@@ -29,9 +29,9 @@ an autoregressive rollout.
 
 ## Data
 
-- **128 flow simulations**, 24 time steps each, on a **512 × 256** grid at 6.25 m spacing
-  (a 3.2 × 1.6 km domain). Fixed injection rate and well locations; **permeability** is the
-  varying input. One held-out ground-truth permeability is the showcase test case.
+- **300 flow simulations**, 24 time steps each, on a **256 × 512** grid (H × W) at 6.25 m
+  spacing (a 1.6 × 3.2 km domain). Fixed injection rate and well locations; **permeability**
+  is the varying input. One held-out ground-truth permeability is the showcase test case.
 - Source simulations are generated with [JutulDarcy.jl](https://github.com/sintefmath/JutulDarcy.jl).
 - Raw data is stored as Julia `.jld2`; `export_data.jl` converts it to portable HDF5.
 

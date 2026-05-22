@@ -80,6 +80,7 @@ for i in 1:N, k in 1:T
     sat[:, :, k, i] = clamp.(field, 0f0, 1f0)
 end
 println("  decoded saturation -> Python shape (", N, ", ", T, ", ", nz, ", ", nx, ")")
+state = nothing; GC.gc()        # free the ~15 GB raw state array
 
 # --- ground-truth trajectory ----------------------------------------------
 gt_sat = Array{Float32}(undef, nx, nz, T)
@@ -96,23 +97,24 @@ catch e
     fill!(gt_sat, 0f0)
 end
 
-# --- permeability ----------------------------------------------------------
-# CONFIRM `perm_var` / `idx_var` with --inspect. Permeability lives in the
-# perm pool file and is selected per-simulation by an index array.
+# --- permeability (selected from the (Nperm, nx, nz) pool by index) --------
 perm = zeros(Float32, nx, nz, N)
 gt_perm = zeros(Float32, nx, nz)
 try
-    pool = readvar(P["raw_perm_jld2"], R["perm_var"])
-    idx = Int.(readvar(P["raw_flow_jld2"], R["idx_var"]))
-    poolaxis = argmax(size(pool))                       # axis indexing the pool
-    getperm(j) = selectdim(pool, poolaxis, j)
+    pool = readvar(P["raw_perm_jld2"], R["perm_var"])       # (Nperm, nx, nz)
+    ndims(pool) == 3 || error("expected a 3-D (Nperm, nx, nz) permeability pool")
+    idx = Int.(readvar(P["raw_flow_jld2"], R["idx_var"]))   # one pool row per simulation
     for i in 1:N
-        perm[:, :, i] = reshape(Float32.(vec(getperm(idx[i]))), nx, nz)
+        perm[:, :, i] = Float32.(pool[idx[i], :, :])
     end
-    println("  paired permeability via '", R["idx_var"], "'  (", length(idx), " sims)")
+    println("  paired permeability via '", R["idx_var"], "'  (", N,
+            " sims, pool size ", size(pool, 1), ")")
+    gtidx = readvar(P["raw_gt_jld2"], R["gt_idx_var"])
+    gtidx = isa(gtidx, AbstractArray) ? Int(gtidx[1]) : Int(gtidx)
+    gt_perm[:, :] = Float32.(pool[gtidx, :, :])
+    println("  ground-truth permeability = ", R["perm_var"], "[", gtidx, "]")
 catch e
-    @warn "PERMEABILITY NOT WIRED UP - writing zeros. Run --inspect, then fix " *
-          "raw.perm_var / raw.idx_var (and this block if the layout differs)." exception=e
+    @warn "permeability not wired up - writing zeros (check raw.perm_var / idx_var)" exception=e
 end
 
 # --- write HDF5 ------------------------------------------------------------

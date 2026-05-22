@@ -6,9 +6,9 @@
 paths:
   # --- raw source data (Julia .jld2) -------------------------------------
   # CONFIRM these with `julia export_data.jl --inspect` before the first run.
-  raw_flow_jld2: /slimdata/abhinav/Sequential_Bayes/JutulSeis/data/cond_rtm/Wise128_state_t1_rtm1_broad_NL_SNR28.jld2
+  raw_flow_jld2: /slimdata/abhinav/Sequential_Bayes/JutulSeis/data/Wise256_state_full_history_broad_new.jld2
   raw_gt_jld2:   /slimdata/abhinav/Sequential_Bayes/JutulSeis/data/cond_rtm/Wise5_state_rtm_Groundtruth_NL_SNR28.jld2
-  raw_perm_jld2: /slimdata/abhinav/Sequential_Bayes/model/broad&narrow_perm_models_new.jld2
+  raw_perm_jld2: /slimdata/abhinav/Sequential_Bayes/model/wise_perm_models_2000_new.jld2
 
   # --- project storage (created if missing) ------------------------------
   data_dir:    /slimdata/abhinav/neuralflow/data
@@ -16,17 +16,18 @@ paths:
   results_dir: /slimdata/abhinav/neuralflow/results
 
 raw:
-  # Variable names inside the .jld2 files. CONFIRM with `--inspect`.
-  flow_var: state128_t1        # flow state array; layout decoded in export_data.jl
-  gt_var:   state128_GT        # ground-truth trajectory
-  perm_var: Ks                 # permeability pool in raw_perm_jld2 (placeholder - confirm)
-  idx_var:  idx_t1             # index (in raw_flow_jld2) mapping sims -> perm pool
+  # Variable names inside the .jld2 files (confirmed via JLD2 inspection).
+  flow_var:   state256_t       # flow state: (300, 512*256*24*2); blocks 1-24 sat, 25-48 pres
+  gt_var:     state128_GT      # ground-truth trajectory: (1, 512*256*24*2)
+  idx_var:    idx_t            # (in raw_flow_jld2) maps each sim -> row of the permeability pool
+  gt_idx_var: idx_GT           # (in raw_gt_jld2) permeability-pool index for the ground truth
+  perm_var:   BroadK           # permeability pool in raw_perm_jld2: (2000, 512, 256)
   # Per-sample flow vector packs 2*n_timesteps blocks of size (nx*nz):
   #   blocks 1..T   = saturation (t1..tT),  blocks T+1..2T = pressure (t1..tT)
   n_attributes: 2              # saturation, pressure
   saturation_block: 1          # 1-indexed block where saturation starts
   # Julia fields are (nx, nz) = (512, 256), x-fast/column-major. export_data.jl
-  # transposes each field to image convention (height=nz, width=nx) = (256, 512).
+  # writes arrays dim-reversed so h5py sees image convention (H=nz, W=nx) = (256, 512).
 
 grid:
   height: 256                  # nz  (depth, array rows)
@@ -35,7 +36,7 @@ grid:
   n_timesteps: 24
 
 data:
-  n_sims: 128
+  n_sims: 300                   # informational; prepare_data.py reads the real count from flow.h5
   split: {train: 0.75, val: 0.125, test: 0.125}   # split is by SIMULATION
   seed: 0
   kfold: 5                      # cross-validation folds (small-data regime)
