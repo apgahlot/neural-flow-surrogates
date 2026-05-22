@@ -41,7 +41,7 @@ data:
   seed: 0
   kfold: 5                      # cross-validation folds (small-data regime)
   perm_log_transform: true      # permeability spans orders of magnitude
-  saturation_clip: [0.0, 1.0]
+  saturation_clip: [0.0, 0.9]   # physical CO2 saturation cap (1 - residual brine sat)
 
 model:
   fno:

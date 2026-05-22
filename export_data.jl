@@ -59,6 +59,7 @@ end
 nx, nz, T = G["width"], G["height"], G["n_timesteps"]   # nx=512 (W), nz=256 (H)
 np_ = nx * nz
 satblk0 = R["saturation_block"]
+sat_lo, sat_hi = Float32(cfg["data"]["saturation_clip"][1]), Float32(cfg["data"]["saturation_clip"][2])
 mkpath(P["data_dir"])
 outpath = joinpath(P["data_dir"], "flow.h5")
 
@@ -78,7 +79,7 @@ pres = Array{Float32}(undef, nx, nz, T, N)
 for i in 1:N, k in 1:T
     osat = (satblk0 - 1 + k - 1) * np_
     opres = (satblk0 - 1 + T + k - 1) * np_
-    sat[:, :, k, i]  = clamp.(reshape(Float32.(state[i, osat + 1 : osat + np_]), nx, nz), 0f0, 1f0)
+    sat[:, :, k, i]  = clamp.(reshape(Float32.(state[i, osat + 1 : osat + np_]), nx, nz), sat_lo, sat_hi)
     pres[:, :, k, i] = reshape(Float32.(state[i, opres + 1 : opres + np_]), nx, nz)
 end
 println("  decoded saturation + pressure -> Python shape (", N, ", ", T, ", ", nz, ", ", nx, ")")
@@ -93,7 +94,7 @@ try
     for k in 1:T
         osat = (satblk0 - 1 + k - 1) * np_
         opres = (satblk0 - 1 + T + k - 1) * np_
-        gt_sat[:, :, k]  = clamp.(reshape(Float32.(gtrow[osat + 1 : osat + np_]), nx, nz), 0f0, 1f0)
+        gt_sat[:, :, k]  = clamp.(reshape(Float32.(gtrow[osat + 1 : osat + np_]), nx, nz), sat_lo, sat_hi)
         gt_pres[:, :, k] = reshape(Float32.(gtrow[opres + 1 : opres + np_]), nx, nz)
     end
     println("  decoded ground-truth trajectory (saturation + pressure)")

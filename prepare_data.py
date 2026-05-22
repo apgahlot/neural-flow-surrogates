@@ -40,6 +40,7 @@ def main():
     kfold = kfold_sim_splits(n_sims, data["kfold"], data["seed"])
     stats = compute_perm_stats(h5_path, splits["train"], data["perm_log_transform"])
     stats.update(compute_pres_stats(h5_path, splits["train"]))
+    stats["sat_max"] = float(data["saturation_clip"][1])
 
     meta_path = os.path.join(cfg.paths["data_dir"], "meta.json")
     save_meta(meta_path, splits, stats, kfold)

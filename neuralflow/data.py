@@ -50,13 +50,15 @@ def kfold_sim_splits(n_sims: int, k: int, seed: int) -> list[dict]:
 class Normalizer:
     """perm : log10 + standardize.  sat : [0,1] -> [-1,1].  pres : min-max -> [-1,1]."""
 
-    def __init__(self, perm_mean, perm_std, perm_log=True, pres_min=0.0, pres_max=1.0):
+    def __init__(self, perm_mean, perm_std, perm_log=True,
+                 pres_min=0.0, pres_max=1.0, sat_max=1.0):
         self.perm_mean = float(perm_mean)
         self.perm_std = float(perm_std) if perm_std else 1.0
         self.perm_log = bool(perm_log)
         self.pres_min = float(pres_min)
         self.pres_max = float(pres_max)
         self._pres_range = max(self.pres_max - self.pres_min, 1e-12)
+        self.sat_max = float(sat_max) if sat_max > 0 else 1.0
 
     def norm_perm(self, x):
         if self.perm_log:
@@ -64,10 +66,10 @@ class Normalizer:
         return (x - self.perm_mean) / self.perm_std
 
     def norm_sat(self, x):
-        return x * 2.0 - 1.0
+        return 2.0 * x / self.sat_max - 1.0
 
     def denorm_sat(self, x):
-        return (x + 1.0) * 0.5
+        return (x + 1.0) * 0.5 * self.sat_max
 
     def norm_pres(self, x):
         return 2.0 * (x - self.pres_min) / self._pres_range - 1.0
@@ -77,12 +79,13 @@ class Normalizer:
 
     def to_dict(self) -> dict:
         return {"perm_mean": self.perm_mean, "perm_std": self.perm_std, "perm_log": self.perm_log,
-                "pres_min": self.pres_min, "pres_max": self.pres_max}
+                "pres_min": self.pres_min, "pres_max": self.pres_max, "sat_max": self.sat_max}
 
     @classmethod
     def from_dict(cls, d: dict) -> "Normalizer":
         return cls(d["perm_mean"], d["perm_std"], d["perm_log"],
-                   d.get("pres_min", 0.0), d.get("pres_max", 1.0))
+                   d.get("pres_min", 0.0), d.get("pres_max", 1.0),
+                   d.get("sat_max", 1.0))
 
 
 def compute_perm_stats(h5_path: str, train_sims: list[int], perm_log: bool) -> dict:
