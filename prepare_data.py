@@ -11,7 +11,7 @@ import os
 import h5py
 
 from neuralflow.config import load_config, ensure_dirs
-from neuralflow.data import compute_perm_stats, kfold_sim_splits, make_sim_splits, save_meta
+from neuralflow.data import compute_perm_stats, compute_pres_stats, kfold_sim_splits, make_sim_splits, save_meta
 
 
 def main():
@@ -39,6 +39,7 @@ def main():
     splits = make_sim_splits(n_sims, data["split"], data["seed"])
     kfold = kfold_sim_splits(n_sims, data["kfold"], data["seed"])
     stats = compute_perm_stats(h5_path, splits["train"], data["perm_log_transform"])
+    stats.update(compute_pres_stats(h5_path, splits["train"]))
 
     meta_path = os.path.join(cfg.paths["data_dir"], "meta.json")
     save_meta(meta_path, splits, stats, kfold)

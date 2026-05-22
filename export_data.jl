@@ -74,27 +74,32 @@ N = size(state, 1)
 println("  flow state size = ", size(state), "  ->  N = ", N, " simulations")
 
 sat = Array{Float32}(undef, nx, nz, T, N)      # reversed dims for h5py
+pres = Array{Float32}(undef, nx, nz, T, N)
 for i in 1:N, k in 1:T
-    blk = (satblk0 - 1 + k - 1) * np_
-    field = reshape(Float32.(state[i, blk + 1 : blk + np_]), nx, nz)
-    sat[:, :, k, i] = clamp.(field, 0f0, 1f0)
+    osat = (satblk0 - 1 + k - 1) * np_
+    opres = (satblk0 - 1 + T + k - 1) * np_
+    sat[:, :, k, i]  = clamp.(reshape(Float32.(state[i, osat + 1 : osat + np_]), nx, nz), 0f0, 1f0)
+    pres[:, :, k, i] = reshape(Float32.(state[i, opres + 1 : opres + np_]), nx, nz)
 end
-println("  decoded saturation -> Python shape (", N, ", ", T, ", ", nz, ", ", nx, ")")
+println("  decoded saturation + pressure -> Python shape (", N, ", ", T, ", ", nz, ", ", nx, ")")
 state = nothing; GC.gc()        # free the ~15 GB raw state array
 
 # --- ground-truth trajectory ----------------------------------------------
 gt_sat = Array{Float32}(undef, nx, nz, T)
+gt_pres = Array{Float32}(undef, nx, nz, T)
 try
     gt = readvar(P["raw_gt_jld2"], R["gt_var"])
     gtrow = ndims(gt) == 1 ? gt : gt[1, :]
     for k in 1:T
-        blk = (satblk0 - 1 + k - 1) * np_
-        gt_sat[:, :, k] = clamp.(reshape(Float32.(gtrow[blk + 1 : blk + np_]), nx, nz), 0f0, 1f0)
+        osat = (satblk0 - 1 + k - 1) * np_
+        opres = (satblk0 - 1 + T + k - 1) * np_
+        gt_sat[:, :, k]  = clamp.(reshape(Float32.(gtrow[osat + 1 : osat + np_]), nx, nz), 0f0, 1f0)
+        gt_pres[:, :, k] = reshape(Float32.(gtrow[opres + 1 : opres + np_]), nx, nz)
     end
-    println("  decoded ground-truth trajectory")
+    println("  decoded ground-truth trajectory (saturation + pressure)")
 catch e
     @warn "could not decode ground truth; writing zeros" exception=e
-    fill!(gt_sat, 0f0)
+    fill!(gt_sat, 0f0); fill!(gt_pres, 0f0)
 end
 
 # --- permeability (selected from the (Nperm, nx, nz) pool by index) --------
@@ -120,11 +125,13 @@ end
 # --- write HDF5 ------------------------------------------------------------
 isfile(outpath) && rm(outpath)
 h5open(outpath, "w") do f
-    f["saturation"] = sat
-    f["permeability"] = perm
-    f["gt_saturation"] = gt_sat
+    f["saturation"]     = sat
+    f["pressure"]       = pres
+    f["permeability"]   = perm
+    f["gt_saturation"]  = gt_sat
+    f["gt_pressure"]    = gt_pres
     f["gt_permeability"] = gt_perm
-    attributes(f)["layout"] = "dims reversed for h5py: saturation=(N,T,H,W)"
+    attributes(f)["layout"] = "dims reversed for h5py: saturation/pressure=(N,T,H,W)"
 end
 println("\nWrote ", outpath)
 println("Done. Next:  python prepare_data.py --config ", cfgpath)

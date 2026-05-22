@@ -8,10 +8,12 @@ simulator and benchmarks them on three axes that actually matter in practice —
 inference speed, and uncertainty calibration** — in the **small-data regime** (≈10²
 simulations), which is the regime most engineering teams are actually in.
 
-The surrogate is **autoregressive**: given a permeability field `K` and the current
-saturation state `Sₜ`, predict `Sₜ₊₁`, then roll out the full horizon. Treating each
-simulation as 23 one-step transitions turns a handful of trajectories into thousands of
-training pairs.
+The surrogate is **autoregressive over the coupled (saturation, pressure) state** —
+because JutulDarcy solves a coupled multiphase-flow system, learning *S* without *P*
+throws away the variable that actually drives the flow. Given a permeability field `K`
+and the current state `(Sₜ, Pₜ)`, the model predicts `(Sₜ₊₁, Pₜ₊₁)`, then rolls out
+the full horizon. Treating each simulation as 23 one-step transitions turns a handful
+of trajectories into thousands of training pairs.
 
 ## Models compared
 

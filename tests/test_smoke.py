@@ -13,34 +13,36 @@ from neuralflow.models.fno import FNO2d
 from neuralflow.models.unet import CondUNet
 
 H, W = 64, 32          # tiny stand-in for the real 256 x 512 grid
+TC, CC = 2, 3          # target channels (sat, pres); cond channels (perm, S_t, P_t)
 
 
 def test_fno_forward_backward():
-    model = FNO2d(in_ch=2, out_ch=1, width=8, modes=(8, 8), n_layers=2)
-    cond = torch.randn(2, 2, H, W)
+    model = FNO2d(in_ch=CC, out_ch=TC, width=8, modes=(8, 8), n_layers=2)
+    cond = torch.randn(2, CC, H, W)
     out = model(cond)
-    assert out.shape == (2, 1, H, W)
+    assert out.shape == (2, TC, H, W)
     out.pow(2).mean().backward()
 
 
 def test_unet_diffusion():
-    denoiser = CondUNet(target_ch=1, cond_ch=2, base=16, channel_mults=(1, 2, 2))
+    denoiser = CondUNet(target_ch=TC, cond_ch=CC, base=16, channel_mults=(1, 2, 2))
     diff = GaussianDiffusion(denoiser, timesteps=20)
-    x0 = torch.randn(2, 1, H, W)
-    cond = torch.randn(2, 2, H, W)
+    x0 = torch.randn(2, TC, H, W)
+    cond = torch.randn(2, CC, H, W)
     loss = diff.loss(x0, cond)
     loss.backward()
-    sample = diff.sample(cond, sampler="ddim", steps=3)
-    assert sample.shape == (2, 1, H, W)
+    sample = diff.sample(cond, shape=(2, TC, H, W), sampler="ddim", steps=3)
+    assert sample.shape == (2, TC, H, W)
 
 
 def test_dit_diffusion():
-    denoiser = DiT(height=H, width=W, patch_size=8, hidden=32, depth=2, heads=4)
+    denoiser = DiT(height=H, width=W, target_ch=TC, cond_ch=CC,
+                   patch_size=8, hidden=32, depth=2, heads=4)
     diff = GaussianDiffusion(denoiser, timesteps=20)
-    x0 = torch.randn(2, 1, H, W)
-    cond = torch.randn(2, 2, H, W)
+    x0 = torch.randn(2, TC, H, W)
+    cond = torch.randn(2, CC, H, W)
     diff.loss(x0, cond).backward()
-    assert diff.sample(cond, sampler="ddim", steps=3).shape == (2, 1, H, W)
+    assert diff.sample(cond, shape=(2, TC, H, W), sampler="ddim", steps=3).shape == (2, TC, H, W)
 
 
 def test_metrics():

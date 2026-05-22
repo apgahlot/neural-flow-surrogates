@@ -48,12 +48,15 @@ def kfold_sim_splits(n_sims: int, k: int, seed: int) -> list[dict]:
 # normalization
 # --------------------------------------------------------------------------
 class Normalizer:
-    """Permeability: optional log10 then standardize. Saturation: [0,1] -> [-1,1]."""
+    """perm : log10 + standardize.  sat : [0,1] -> [-1,1].  pres : min-max -> [-1,1]."""
 
-    def __init__(self, perm_mean: float, perm_std: float, perm_log: bool = True):
+    def __init__(self, perm_mean, perm_std, perm_log=True, pres_min=0.0, pres_max=1.0):
         self.perm_mean = float(perm_mean)
         self.perm_std = float(perm_std) if perm_std else 1.0
-        self.perm_log = perm_log
+        self.perm_log = bool(perm_log)
+        self.pres_min = float(pres_min)
+        self.pres_max = float(pres_max)
+        self._pres_range = max(self.pres_max - self.pres_min, 1e-12)
 
     def norm_perm(self, x):
         if self.perm_log:
@@ -66,12 +69,20 @@ class Normalizer:
     def denorm_sat(self, x):
         return (x + 1.0) * 0.5
 
+    def norm_pres(self, x):
+        return 2.0 * (x - self.pres_min) / self._pres_range - 1.0
+
+    def denorm_pres(self, x):
+        return (x + 1.0) * 0.5 * self._pres_range + self.pres_min
+
     def to_dict(self) -> dict:
-        return {"perm_mean": self.perm_mean, "perm_std": self.perm_std, "perm_log": self.perm_log}
+        return {"perm_mean": self.perm_mean, "perm_std": self.perm_std, "perm_log": self.perm_log,
+                "pres_min": self.pres_min, "pres_max": self.pres_max}
 
     @classmethod
     def from_dict(cls, d: dict) -> "Normalizer":
-        return cls(d["perm_mean"], d["perm_std"], d["perm_log"])
+        return cls(d["perm_mean"], d["perm_std"], d["perm_log"],
+                   d.get("pres_min", 0.0), d.get("pres_max", 1.0))
 
 
 def compute_perm_stats(h5_path: str, train_sims: list[int], perm_log: bool) -> dict:
@@ -81,6 +92,17 @@ def compute_perm_stats(h5_path: str, train_sims: list[int], perm_log: bool) -> d
     if perm_log:
         perm = np.log10(np.clip(perm, 1e-12, None))
     return {"perm_mean": float(perm.mean()), "perm_std": float(perm.std()), "perm_log": perm_log}
+
+
+def compute_pres_stats(h5_path: str, train_sims: list[int]) -> dict:
+    """min and max of pressure across the training simulations and all timesteps."""
+    mn, mx = float("inf"), float("-inf")
+    with h5py.File(h5_path, "r") as f:
+        for s in sorted(train_sims):
+            block = f["pressure"][s][...]
+            mn = min(mn, float(block.min()))
+            mx = max(mx, float(block.max()))
+    return {"pres_min": mn, "pres_max": mx}
 
 
 # --------------------------------------------------------------------------
@@ -100,11 +122,11 @@ def load_meta(path: str) -> dict:
 # datasets
 # --------------------------------------------------------------------------
 class FlowDataset(Dataset):
-    """Autoregressive transition pairs.
+    """Autoregressive transition pairs over the coupled (saturation, pressure) state.
 
     __getitem__ returns:
-        cond   : (2, H, W)  channels = [permeability, S_t]
-        target : (1, H, W)  = S_{t+1}
+        cond   : (3, H, W)  channels = [permeability, S_t, P_t]
+        target : (2, H, W)  channels = [S_{t+1}, P_{t+1}]
     """
 
     def __init__(self, h5_path: str, sim_indices, normalizer: Normalizer, n_timesteps: int):
@@ -129,8 +151,10 @@ class FlowDataset(Dataset):
         perm = self.norm.norm_perm(f["permeability"][sim].astype("float32"))
         sat_t = self.norm.norm_sat(f["saturation"][sim, t].astype("float32"))
         sat_t1 = self.norm.norm_sat(f["saturation"][sim, t + 1].astype("float32"))
-        cond = np.stack([perm, sat_t], axis=0).astype("float32")
-        target = sat_t1[None].astype("float32")
+        pres_t = self.norm.norm_pres(f["pressure"][sim, t].astype("float32"))
+        pres_t1 = self.norm.norm_pres(f["pressure"][sim, t + 1].astype("float32"))
+        cond = np.stack([perm, sat_t, pres_t], axis=0).astype("float32")
+        target = np.stack([sat_t1, pres_t1], axis=0).astype("float32")
         return {
             "cond": torch.from_numpy(cond),
             "target": torch.from_numpy(target),
@@ -140,12 +164,16 @@ class FlowDataset(Dataset):
 
 
 def load_trajectory(h5_path: str, sim: int, normalizer: Normalizer, group: str = "saturation"):
-    """Return (normalized permeability (H,W), raw saturation trajectory (T,H,W))."""
+    """Return (perm_norm (H,W), sat_raw (T,H,W), pres_raw (T,H,W)) in physical units."""
     with h5py.File(h5_path, "r") as f:
         if group == "gt":
             perm = f["gt_permeability"][:]
             sat = f["gt_saturation"][:]
+            pres = f["gt_pressure"][:]
         else:
             perm = f["permeability"][sim]
             sat = f["saturation"][sim]
-    return normalizer.norm_perm(perm.astype("float32")), sat.astype("float32")
+            pres = f["pressure"][sim]
+    return (normalizer.norm_perm(perm.astype("float32")),
+            sat.astype("float32"),
+            pres.astype("float32"))

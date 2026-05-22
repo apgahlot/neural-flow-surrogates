@@ -18,20 +18,21 @@ def build_model(name: str, cfg):
     """Construct a model from its name and the experiment config."""
     grid, mc, dc = cfg["grid"], cfg["model"], cfg["diffusion"]
 
+    # joint (saturation, pressure) state -> 2 target channels; cond = [perm, S_t, P_t] -> 3 channels
     if name == "fno":
         m = mc["fno"]
-        return FNO2d(in_ch=2, out_ch=1, width=m["width"],
+        return FNO2d(in_ch=3, out_ch=2, width=m["width"],
                      modes=tuple(m["modes"]), n_layers=m["n_layers"])
 
     if name == "diffusion-unet":
         u = mc["unet"]
-        denoiser = CondUNet(target_ch=1, cond_ch=2, base=u["base_channels"],
+        denoiser = CondUNet(target_ch=2, cond_ch=3, base=u["base_channels"],
                             channel_mults=tuple(u["channel_mults"]))
         return GaussianDiffusion(denoiser, timesteps=dc["timesteps"], schedule=dc["schedule"])
 
     if name == "diffusion-dit":
         d = mc["dit"]
-        denoiser = DiT(height=grid["height"], width=grid["width"], target_ch=1, cond_ch=2,
+        denoiser = DiT(height=grid["height"], width=grid["width"], target_ch=2, cond_ch=3,
                        patch_size=d["patch_size"], hidden=d["hidden_size"],
                        depth=d["depth"], heads=d["num_heads"])
         return GaussianDiffusion(denoiser, timesteps=dc["timesteps"], schedule=dc["schedule"])

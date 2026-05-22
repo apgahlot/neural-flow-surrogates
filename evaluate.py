@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Evaluate a trained surrogate by autoregressive rollout over the test set.
+"""Evaluate a trained joint-state surrogate by autoregressive rollout over the test set.
 
-Reports per-step relative L2, plume IoU, inference speed, and (for generative
-models / FNO ensembles) CRPS, interval coverage and calibration error.
-Writes results JSON + an error-growth figure to $results_dir.
+Reports per-channel (saturation, pressure) relative L2 across the rollout,
+plume IoU (saturation), inference speed, and CRPS / interval coverage /
+calibration error for FNO ensembles and generative models.
 
 Examples
 --------
@@ -61,54 +61,83 @@ def main():
         diff = load_trained(args.model, cfg, os.path.join(ckdir, f"{args.model}.pt"), device)
         n_samples = args.samples or cfg.eval["uq_samples"]
 
-    rl2 = np.zeros(n_steps + 1)
+    rl2_sat = np.zeros(n_steps + 1)
+    rl2_pres = np.zeros(n_steps + 1)
     iou = np.zeros(n_steps + 1)
-    crps_all, cal_all, cov_all, times = [], [], [], []
+    crps_sat, crps_pres = [], []
+    cal_sat, cal_pres = [], []
+    cov_sat, cov_pres = [], []
+    times = []
 
     for sim in test_sims:
-        perm_np, sat_raw = load_trajectory(h5, sim, norm)
+        perm_np, sat_raw, pres_raw = load_trajectory(h5, sim, norm)
         perm = torch.from_numpy(perm_np)
-        sat0 = torch.from_numpy(norm.norm_sat(sat_raw[0]))
-        true = sat_raw[: n_steps + 1]
+        state0 = torch.from_numpy(np.stack(
+            [norm.norm_sat(sat_raw[0]), norm.norm_pres(pres_raw[0])], axis=0))
+        true_sat = sat_raw[: n_steps + 1]
+        true_pres = pres_raw[: n_steps + 1]
 
         with Timer() as tm:
             if args.model == "fno":
-                traj = rollout_fno(members, perm, sat0, n_steps, device)
+                traj = rollout_fno(members, perm, state0, n_steps, device)
             else:
-                traj = rollout_diffusion(diff, perm, sat0, n_steps, n_samples, device,
+                traj = rollout_diffusion(diff, perm, state0, n_steps, n_samples, device,
                                          cfg.diffusion["sampler"], cfg.diffusion["sampler_steps"])
         times.append(tm.seconds)
 
-        traj = norm.denorm_sat(traj)                       # (M, n_steps+1, H, W) in [0,1]
-        mean = traj.mean(axis=0)
-        rl2 += np.array([metrics.relative_l2(mean[k][None], true[k][None]) for k in range(n_steps + 1)])
-        iou += np.array([metrics.plume_iou(mean[k], true[k], thr) for k in range(n_steps + 1)])
-        if traj.shape[0] > 1:
-            crps_all.append(metrics.crps_ensemble(traj, true))
-            cal_all.append(metrics.calibration_error(traj, true))
-            cov_all.append(metrics.interval_coverage(traj, true))
+        sat_traj = norm.denorm_sat(traj[:, :, 0, :, :])         # (M, n_steps+1, H, W) physical
+        pres_traj = norm.denorm_pres(traj[:, :, 1, :, :])
+        sat_mean = sat_traj.mean(axis=0)
+        pres_mean = pres_traj.mean(axis=0)
+
+        rl2_sat += np.array([metrics.relative_l2(sat_mean[k][None], true_sat[k][None]) for k in range(n_steps + 1)])
+        rl2_pres += np.array([metrics.relative_l2(pres_mean[k][None], true_pres[k][None]) for k in range(n_steps + 1)])
+        iou += np.array([metrics.plume_iou(sat_mean[k], true_sat[k], thr) for k in range(n_steps + 1)])
+
+        if sat_traj.shape[0] > 1:
+            crps_sat.append(metrics.crps_ensemble(sat_traj, true_sat))
+            crps_pres.append(metrics.crps_ensemble(pres_traj, true_pres))
+            cal_sat.append(metrics.calibration_error(sat_traj, true_sat))
+            cal_pres.append(metrics.calibration_error(pres_traj, true_pres))
+            cov_sat.append(metrics.interval_coverage(sat_traj, true_sat))
+            cov_pres.append(metrics.interval_coverage(pres_traj, true_pres))
 
     n = max(len(test_sims), 1)
-    rl2 /= n
+    rl2_sat /= n
+    rl2_pres /= n
     iou /= n
     results = {
         "model": args.model,
         "n_test_sims": len(test_sims),
         "rollout_steps": n_steps,
-        "rel_l2_per_step": rl2.round(5).tolist(),
-        "rel_l2_final": float(rl2[-1]),
-        "rel_l2_mean": float(rl2.mean()),
-        "plume_iou_mean": float(iou.mean()),
+        "saturation": {
+            "rel_l2_per_step": rl2_sat.round(5).tolist(),
+            "rel_l2_final": float(rl2_sat[-1]),
+            "rel_l2_mean": float(rl2_sat.mean()),
+            "plume_iou_per_step": iou.round(4).tolist(),
+            "plume_iou_mean": float(iou.mean()),
+        },
+        "pressure": {
+            "rel_l2_per_step": rl2_pres.round(5).tolist(),
+            "rel_l2_final": float(rl2_pres[-1]),
+            "rel_l2_mean": float(rl2_pres.mean()),
+        },
         "rollout_seconds_mean": float(np.mean(times)),
     }
     jutul = cfg.eval.get("jutul_reference_seconds")
     if jutul:
         results["speedup_vs_jutuldarcy"] = float(jutul) / float(np.mean(times))
-    if crps_all:
-        results["crps_mean"] = float(np.mean(crps_all))
-        results["calibration_error_mean"] = float(np.mean(cal_all))
-        keys = sorted(cov_all[0].keys())
-        results["coverage"] = {str(k): float(np.mean([c[k] for c in cov_all])) for k in keys}
+    if crps_sat:
+        results["saturation"].update({
+            "crps_mean": float(np.mean(crps_sat)),
+            "calibration_error_mean": float(np.mean(cal_sat)),
+            "coverage": {str(k): float(np.mean([c[k] for c in cov_sat])) for k in sorted(cov_sat[0])},
+        })
+        results["pressure"].update({
+            "crps_mean": float(np.mean(crps_pres)),
+            "calibration_error_mean": float(np.mean(cal_pres)),
+            "coverage": {str(k): float(np.mean([c[k] for c in cov_pres])) for k in sorted(cov_pres[0])},
+        })
 
     os.makedirs(cfg.paths["results_dir"], exist_ok=True)
     out = os.path.join(cfg.paths["results_dir"], f"eval_{args.model}.json")
@@ -116,11 +145,13 @@ def main():
         json.dump(results, fh, indent=2)
 
     steps = np.arange(n_steps + 1)
-    fig, ax = plt.subplots(1, 2, figsize=(10, 3.6))
-    ax[0].plot(steps, rl2, "o-")
-    ax[0].set(xlabel="rollout step", ylabel="relative L2", title="error growth")
-    ax[1].plot(steps, iou, "s-", color="seagreen")
-    ax[1].set(xlabel="rollout step", ylabel="plume IoU", title="front fidelity")
+    fig, ax = plt.subplots(1, 3, figsize=(13.5, 3.6))
+    ax[0].plot(steps, rl2_sat, "o-")
+    ax[0].set(xlabel="rollout step", ylabel="relative L2", title="saturation error")
+    ax[1].plot(steps, rl2_pres, "o-", color="darkorange")
+    ax[1].set(xlabel="rollout step", ylabel="relative L2", title="pressure error")
+    ax[2].plot(steps, iou, "s-", color="seagreen")
+    ax[2].set(xlabel="rollout step", ylabel="plume IoU", title="front fidelity (sat)")
     for a in ax:
         a.grid(alpha=0.3)
     fig.suptitle(f"{args.model} - autoregressive rollout ({len(test_sims)} test sims)")
