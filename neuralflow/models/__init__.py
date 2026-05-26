@@ -21,8 +21,14 @@ def build_model(name: str, cfg):
     # joint (saturation, pressure) state -> 2 target channels; cond = [perm, S_t, P_t] -> 3 channels
     if name == "fno":
         m = mc["fno"]
+        # residual_per_channel (list) takes precedence over scalar residual
+        if "residual_per_channel" in m:
+            residual = list(m["residual_per_channel"])
+        else:
+            residual = bool(m.get("residual", True))
         return FNO2d(in_ch=3, out_ch=2, width=m["width"],
-                     modes=tuple(m["modes"]), n_layers=m["n_layers"])
+                     modes=tuple(m["modes"]), n_layers=m["n_layers"],
+                     residual=residual)
 
     if name == "diffusion-unet":
         u = mc["unet"]

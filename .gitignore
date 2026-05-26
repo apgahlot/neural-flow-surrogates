@@ -1,3 +1,6 @@
+# SLURM stdout/stderr logs from training jobs (transient output, not source)
+slurm/logs/
+
 # Data, models, results live outside the repo (see configs/default.yaml) — never commit them
 *.jld2
 *.h5

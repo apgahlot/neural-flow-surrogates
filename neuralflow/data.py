@@ -166,6 +166,60 @@ class FlowDataset(Dataset):
         }
 
 
+class FlowSequenceDataset(Dataset):
+    """K-step transition windows for pushforward (unrolled) training.
+
+    __getitem__ returns:
+        cond    : (3, H, W)        channels = [permeability, S_t, P_t]
+        targets : (K, 2, H, W)     channels = [S_{t+1..t+K}, P_{t+1..t+K}]
+        perm    : (H, W)           permeability separately, so the training
+                                   loop can re-concatenate it with each
+                                   unrolled prediction without re-loading.
+
+    Sampling: every (sim, t_start) with 0 <= t_start <= T-1-K.
+    """
+
+    def __init__(self, h5_path: str, sim_indices, normalizer: Normalizer,
+                 n_timesteps: int, k_steps: int = 2):
+        self.h5_path = h5_path
+        self.sims = list(sim_indices)
+        self.norm = normalizer
+        self.T = n_timesteps
+        self.K = max(1, int(k_steps))
+        self.pairs = [(s, t) for s in self.sims for t in range(self.T - self.K)]
+        self._h5 = None
+
+    def _file(self) -> h5py.File:
+        if self._h5 is None:
+            self._h5 = h5py.File(self.h5_path, "r")
+        return self._h5
+
+    def __len__(self) -> int:
+        return len(self.pairs)
+
+    def __getitem__(self, i: int) -> dict:
+        sim, t = self.pairs[i]
+        f = self._file()
+        perm_phys = f["permeability"][sim].astype("float32")
+        perm = self.norm.norm_perm(perm_phys)
+        sat_t = self.norm.norm_sat(f["saturation"][sim, t].astype("float32"))
+        pres_t = self.norm.norm_pres(f["pressure"][sim, t].astype("float32"))
+        cond = np.stack([perm, sat_t, pres_t], axis=0).astype("float32")
+        targets = np.empty((self.K, 2, *perm.shape), dtype=np.float32)
+        for k in range(self.K):
+            targets[k, 0] = self.norm.norm_sat(
+                f["saturation"][sim, t + k + 1].astype("float32"))
+            targets[k, 1] = self.norm.norm_pres(
+                f["pressure"][sim, t + k + 1].astype("float32"))
+        return {
+            "cond": torch.from_numpy(cond),
+            "targets": torch.from_numpy(targets),
+            "perm": torch.from_numpy(perm.astype("float32")),
+            "sim": sim,
+            "t": t,
+        }
+
+
 def load_trajectory(h5_path: str, sim: int, normalizer: Normalizer, group: str = "saturation"):
     """Return (perm_norm (H,W), sat_raw (T,H,W), pres_raw (T,H,W)) in physical units."""
     with h5py.File(h5_path, "r") as f:

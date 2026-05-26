@@ -46,8 +46,13 @@ data:
 model:
   fno:
     width: 36
-    modes: [32, 32]
+    modes: [20, 20]              # was [32, 32]; 1024 modes overfit with 300 sims (val/train ~8x)
     n_layers: 4
+    # Per-channel residual: [saturation, pressure].
+    # Saturation: predict full field (front advances by large deltas; residual
+    #   prior was biasing toward small corrections, blocking front motion).
+    # Pressure: keep residual (smooth, slow-varying; residual prior is correct).
+    residual_per_channel: [false, true]
   unet:
     base_channels: 64
     channel_mults: [1, 2, 2, 4]   # self-attention is applied at the bottleneck only
@@ -67,12 +72,29 @@ train:
   epochs: 300
   batch_size: 16
   lr: 3.0e-4
-  weight_decay: 1.0e-5
+  weight_decay: 3.0e-4          # 1e-4 still gave train/val ~5x at epoch 30; bump again
   grad_clip: 1.0
   amp: true                     # mixed precision
   ema_decay: 0.999              # for diffusion models
   num_workers: 8
   ensemble_size: 5              # FNO deep-ensemble members
+  sat_loss_weight: 10.0         # up-weight sparse saturation channel vs. smooth pressure
+  pres_loss_weight: 1.0
+  # ---- pushforward / unrolled training (FNO) ------------------------------
+  k_steps_max: 2                # K-step unroll after warmup; K=2 is Brandstetter default
+  warmup_k1_epochs: 10          # longer K=1 maturation; alpha=20 ran 5 ep, val plateaued ep 11
+  # ---- front-aware saturation loss ----------------------------------------
+  sat_threshold: 0.01           # physical sat (units of S); >this counts as plume cell
+  mask_alpha: 10.0              # halved; alpha=20 overfit plume locations on train (val drift)
+  mask_dilate: 5                # wider halo so loss covers cells the front is moving *into*
+  huber_beta: 0.05              # Huber/smooth-L1 transition point (normalized sat units)
+  # ---- input-noise augmentation (FNO) -------------------------------------
+  # Perturb state channels of cond with Gaussian noise during training only.
+  # Teaches the model to recover from its own rollout errors (generalization
+  # of the pushforward trick). Std is in normalized units; 0.03 was the
+  # sweet spot (0.05 over-regularized in run 4 -> val_sat 0.060 -> 0.076).
+  input_noise_sat: 0.03
+  input_noise_pres: 0.0         # pressure already at floor; don't perturb yet
 
 eval:
   rollout_steps: 23             # t1 -> t24

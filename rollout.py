@@ -110,10 +110,28 @@ def main():
           ["plasma", "plasma", "magma", "cividis"],
           os.path.join(cfg.paths["results_dir"], f"rollout_{args.model}_{case}_pressure.png"))
 
-    rl2 = lambda pred, true: np.mean([
-        np.linalg.norm(pred[k] - true[k]) / (np.linalg.norm(true[k]) + 1e-8) for k in range(n_steps + 1)])
-    print(f"mean rollout rel-L2  saturation: {rl2(sat_mean, true_sat):.4f}   "
-          f"pressure: {rl2(pres_mean, true_pres):.4f}")
+    rl2_step = lambda pred, true, k: float(
+        np.linalg.norm(pred[k] - true[k]) / (np.linalg.norm(true[k]) + 1e-8))
+    sat_steps = [rl2_step(sat_mean, true_sat, k) for k in range(n_steps + 1)]
+    pres_steps = [rl2_step(pres_mean, true_pres, k) for k in range(n_steps + 1)]
+
+    # Plume IoU at the physical front threshold (S > front_threshold).
+    iou_thr = float(cfg.eval.get("front_threshold", 0.1))
+    iou_steps = []
+    for k in range(n_steps + 1):
+        p = sat_mean[k] > iou_thr
+        t = true_sat[k] > iou_thr
+        inter = float(np.logical_and(p, t).sum())
+        union = float(np.logical_or(p, t).sum())
+        iou_steps.append(inter / max(union, 1.0))
+
+    print(f"mean rollout rel-L2  saturation: {np.mean(sat_steps):.4f}   "
+          f"pressure: {np.mean(pres_steps):.4f}")
+    print(f"mean plume IoU (S > {iou_thr}): {np.mean(iou_steps):.4f}")
+    print("per-step rel-L2 (sat | pres) and plume IoU:")
+    for k in range(n_steps + 1):
+        print(f"  t={k:2d}   sat {sat_steps[k]:.4f}   "
+              f"pres {pres_steps[k]:.4f}   IoU {iou_steps[k]:.3f}")
     print("wrote two figures to", cfg.paths["results_dir"])
 
 
