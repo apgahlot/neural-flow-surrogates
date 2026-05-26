@@ -88,9 +88,26 @@ neural-flow-surrogates/
 
 ## Status
 
-Phase 1 (FNO + conditional diffusion) is the current scaffold. Phase 2 adds the DiT
-backbone; Phase 3 adds a Navier–Stokes generalization study. Results and figures will be
-added as runs complete.
+Phase 1 (FNO + conditional diffusion) is in progress. Phase 2 will add the DiT backbone;
+Phase 3 will add a Navier–Stokes generalization study.
+
+### Current results — held-out ground-truth permeability
+
+| Model | Sat rollout rel-L2 ↓ | Pres rollout rel-L2 ↓ | Plume IoU (S > 0.1) ↑ |
+|-------|----------------------|------------------------|------------------------|
+| FNO (deep ensemble, 1 member) | **0.80** | 0.087 | **0.49** |
+| Conditional diffusion (U-Net) | *inference bug under investigation* | — | — |
+
+FNO training uses a combination of tricks that matter for this small-data, sharp-front
+regime: per-channel residual prediction (full sat / residual pres), K-step pushforward
+curriculum (Brandstetter et al., 2022), a front-aware Huber loss with a dilated plume mask,
+and input-noise augmentation on the conditioning state. Together they take the sat rollout
+from ~0.99 (single-step baseline) down to 0.80 with the same architecture and dataset.
+See [NOTES.md](NOTES.md) for the full design rationale and failure-mode catalogue.
+
+The current FNO rollout is not yet at the target front fidelity, and the diffusion-unet
+rollout has a separate inference plumbing bug to fix — these are the next two items
+on the roadmap before publishing the full accuracy / speed / uncertainty trade-off.
 
 ## License
 
